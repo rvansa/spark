@@ -144,6 +144,12 @@ package object config {
       .booleanConf
       .createWithDefault(false)
 
+  private[spark] val DRIVER_CHECKPOINT_LOCATION =
+    ConfigBuilder(SparkLauncher.DRIVER_CHECKPOINT_LOCATION)
+      .version("9.9.9")
+      .stringConf
+      .createOptional
+
   private[spark] val EVENT_LOG_ENABLED = ConfigBuilder("spark.eventLog.enabled")
     .version("1.0.0")
     .booleanConf
@@ -325,6 +331,12 @@ package object config {
     .version("0.7.0")
     .bytesConf(ByteUnit.MiB)
     .createWithDefaultString("1g")
+
+  private[spark] val EXECUTOR_CHECKPOINT_LOCATION =
+    ConfigBuilder("spark.executor.checkpointLocation")
+      .version("9.9.9")
+      .stringConf
+      .createOptional
 
   private[spark] val EXECUTOR_MEMORY_OVERHEAD = ConfigBuilder("spark.executor.memoryOverhead")
     .doc("The amount of non-heap memory to be allocated per executor, in MiB unless otherwise" +

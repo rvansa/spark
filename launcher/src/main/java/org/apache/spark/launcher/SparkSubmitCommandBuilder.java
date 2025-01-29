@@ -301,6 +301,15 @@ class SparkSubmitCommandBuilder extends AbstractCommandBuilder {
       addOptionString(cmd, driverExtraJavaOptions);
       mergeEnvPathList(env, getLibPathEnvName(),
         config.get(SparkLauncher.DRIVER_EXTRA_LIBRARY_PATH));
+      String checkpointLocation = config.get(SparkLauncher.DRIVER_CHECKPOINT_LOCATION);
+      if (checkpointLocation != null) {
+        File checkpointDir = new File(checkpointLocation);
+        if (checkpointDir.exists() && checkpointDir.isDirectory() && checkpointDir.list().length > 0) {
+          addOptionString(cmd, "-XX:CRaCRestoreFrom=" + checkpointLocation);
+        } else {
+          addOptionString(cmd, "-XX:CRaCCheckpointTo=" + checkpointLocation + " -Dspark.driver.onStop=checkpoint");
+        }
+      }
     }
 
     // SPARK-36796: Always add default `--add-opens` to submit command

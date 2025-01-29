@@ -24,6 +24,7 @@ import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.{config, Logging}
 import org.apache.spark.rpc.RpcEnv
 import org.apache.spark.util._
+import org.crac.Core
 
 /**
  * Utility object for launching driver programs such that they share fate with the Worker process.
@@ -63,6 +64,10 @@ object DriverWrapper extends Logging {
         mainMethod.invoke(null, extraArgs.toArray[String])
 
         rpcEnv.shutdown()
+        if ("checkpoint".equalsIgnoreCase(System.getProperty("spark.driver.onStop"))) {
+          System.clearProperty("spark.driver.onStop")
+          Core.checkpointRestore()
+        }
 
       case _ =>
         // scalastyle:off println

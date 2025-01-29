@@ -19,6 +19,8 @@ package org.apache.spark.deploy.worker
 
 import java.util.concurrent.atomic.AtomicBoolean
 
+import org.crac.{ Context, Core, Resource }
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.rpc._
 
@@ -32,7 +34,7 @@ private[spark] class WorkerWatcher(
     workerUrl: String,
     isTesting: Boolean = false,
     isChildProcessStopping: AtomicBoolean = new AtomicBoolean(false))
-  extends RpcEndpoint with Logging {
+  extends RpcEndpoint with Logging with Resource {
 
   logInfo(s"Connecting to worker $workerUrl")
   if (!isTesting) {
@@ -49,6 +51,10 @@ private[spark] class WorkerWatcher(
   // Lets filter events only from the worker's rpc system
   private val expectedAddress = RpcAddress.fromUrlString(workerUrl)
   private def isWorker(address: RpcAddress) = expectedAddress == address
+
+  private var isCheckpoint = false
+
+  Core.getGlobalContext.register(this)
 
   private def exitNonZero() =
     if (isTesting) {
@@ -72,7 +78,11 @@ private[spark] class WorkerWatcher(
     }
   }
 
-  override def onDisconnected(remoteAddress: RpcAddress): Unit = {
+  override def onDisconnected(remoteAddress: RpcAddress): Unit = synchronized {
+    if (isCheckpoint) {
+      logInfo(s"Ignoring disconnect on $workerUrl (checkpoint)")
+      return
+    }
     if (isWorker(remoteAddress)) {
       // This log message will never be seen
       logError(s"Lost connection to worker rpc endpoint $workerUrl. Exiting.")
@@ -87,5 +97,13 @@ private[spark] class WorkerWatcher(
       logError(s"Error was: $cause")
       exitNonZero()
     }
+  }
+
+  override def beforeCheckpoint(context: Context[_ <: Resource]): Unit = synchronized {
+    isCheckpoint = true
+  }
+
+  override def afterRestore(context: Context[_ <: Resource]): Unit = synchronized {
+    isCheckpoint = false
   }
 }

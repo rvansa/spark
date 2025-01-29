@@ -178,6 +178,11 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
+      <groupId>org.crac</groupId>
+      <artifactId>crac</artifactId>
+      <version>${org.crac.version}</version>
+    </dependency>
+    <dependency>
       <groupId>jakarta.servlet</groupId>
       <artifactId>jakarta.servlet-api</artifactId>
       <version>${jakartaservlet.version}</version>

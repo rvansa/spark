@@ -19,6 +19,7 @@ package org.apache.spark.network.server;
 
 import java.io.Closeable;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -34,6 +35,9 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import org.apache.commons.lang3.SystemUtils;
+import org.crac.Context;
+import org.crac.Core;
+import org.crac.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +60,7 @@ public class TransportServer implements Closeable {
   private int port = -1;
   private final PooledByteBufAllocator pooledAllocator;
   private NettyMemoryMetrics metrics;
+  private Resource cracResource;
 
   /**
    * Creates a TransportServer that binds to the given host and the given port, or to any available
@@ -97,13 +102,17 @@ public class TransportServer implements Closeable {
     return port;
   }
 
-  private void init(String hostToBind, int portToBind) {
+  private synchronized void init(String hostToBind, int portToBind) {
 
     IOMode ioMode = IOMode.valueOf(conf.ioMode());
     EventLoopGroup bossGroup = NettyUtils.createEventLoop(ioMode, 1,
       conf.getModuleName() + "-boss");
     EventLoopGroup workerGroup =  NettyUtils.createEventLoop(ioMode, conf.serverThreads(),
       conf.getModuleName() + "-server");
+
+    cracResource = new CracResource(bossGroup, workerGroup);
+    // Race: eventloops are not handled if checkpoint happens before registration
+    Core.getGlobalContext().register(cracResource);
 
     bootstrap = new ServerBootstrap()
       .group(bossGroup, workerGroup)
@@ -146,6 +155,12 @@ public class TransportServer implements Closeable {
 
     InetSocketAddress address = hostToBind == null ?
         new InetSocketAddress(portToBind): new InetSocketAddress(hostToBind, portToBind);
+
+    bind(address);
+  }
+
+  // synchronized to not run before the bootstrap is initialized
+  private synchronized void bind(SocketAddress address) {
     channelFuture = bootstrap.bind(address);
     channelFuture.syncUninterruptibly();
 
@@ -158,13 +173,17 @@ public class TransportServer implements Closeable {
     return metrics;
   }
 
-  @Override
-  public void close() {
+  private void unbind() {
     if (channelFuture != null) {
       // close is a local operation and should finish within milliseconds; timeout just to be safe
       channelFuture.channel().close().awaitUninterruptibly(10, TimeUnit.SECONDS);
       channelFuture = null;
     }
+  }
+
+  @Override
+  public synchronized void close() {
+    unbind();
     if (bootstrap != null && bootstrap.config().group() != null) {
       bootstrap.config().group().shutdownGracefully();
     }
@@ -176,5 +195,30 @@ public class TransportServer implements Closeable {
 
   public Counter getRegisteredConnections() {
     return context.getRegisteredConnections();
+  }
+
+  private class CracResource extends EventLoopResource {
+    private SocketAddress address;
+
+    public CracResource(EventLoopGroup... eventLoopGroups) {
+      super(eventLoopGroups);
+    }
+
+    @Override
+    public void beforeCheckpoint(Context<? extends Resource> context) {
+      if (channelFuture != null) {
+        address = channelFuture.channel().localAddress();
+        unbind();
+      }
+      super.beforeCheckpoint(context);
+    }
+
+    @Override
+    public void afterRestore(Context<? extends Resource> context) {
+      super.afterRestore(context);
+      if (address != null) {
+        bind(address);
+      }
+    }
   }
 }

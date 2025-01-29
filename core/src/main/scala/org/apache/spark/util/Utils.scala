@@ -61,6 +61,7 @@ import org.apache.hadoop.util.{RunJar, StringUtils}
 import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.logging.log4j.{Level, LogManager}
 import org.apache.logging.log4j.core.LoggerContext
+import org.crac.{ Context, Core, Resource }
 import org.eclipse.jetty.util.MultiException
 import org.slf4j.Logger
 
@@ -93,6 +94,7 @@ private[spark] object CallSite {
  */
 private[spark] object Utils
   extends Logging
+  with Resource
   with SparkClassUtils
   with SparkErrorUtils
   with SparkFileUtils
@@ -3104,6 +3106,16 @@ private[spark] object Utils
       val useG1GC = valueMethod.invoke(useG1GCObject).asInstanceOf[String]
       "true".equals(useG1GC)
     }.getOrElse(false)
+  }
+
+  Core.getGlobalContext.register(this)
+
+  override def beforeCheckpoint(context: Context[_ <: Resource]): Unit = synchronized {
+    cachedLocalDir = ""
+    localRootDirs = null
+  }
+
+  override def afterRestore(context: Context[_ <: Resource]): Unit = {
   }
 }
 

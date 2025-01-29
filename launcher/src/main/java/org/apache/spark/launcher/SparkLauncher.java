@@ -62,6 +62,8 @@ public class SparkLauncher extends AbstractLauncher<SparkLauncher> {
   public static final String DRIVER_EXTRA_JAVA_OPTIONS = "spark.driver.extraJavaOptions";
   /** Configuration key for the driver native library path. */
   public static final String DRIVER_EXTRA_LIBRARY_PATH = "spark.driver.extraLibraryPath";
+  /** Configuration key for location of CRaC checkpoint used by the driver */
+  public static final String DRIVER_CHECKPOINT_LOCATION = "spark.driver.checkpointLocation";
 
   /** Configuration key for the executor memory. */
   public static final String EXECUTOR_MEMORY = "spark.executor.memory";

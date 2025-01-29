@@ -27,6 +27,7 @@ import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 
 import io.netty.util.internal.PlatformDependent
+import org.crac.Core
 import org.json4s.DefaultFormats
 
 import org.apache.spark._
@@ -203,6 +204,21 @@ private[spark] class CoarseGrainedExecutorBackend(
       }
 
     case StopExecutor =>
+      val onStopProperty = "spark.executor.onStop"
+      if ("checkpoint".equalsIgnoreCase(System.getProperty(onStopProperty))) {
+        System.setProperty(onStopProperty, "halt");
+        try {
+          executor.stopComponents()
+          Core.checkpointRestore()
+        } catch {
+          case t: Throwable => logError("Checkpoint failed,", t)
+        } finally {
+          // Don't run any shutdown hooks
+          Runtime.getRuntime().halt(0);
+        }
+      } else if ("halt".equalsIgnoreCase(System.getProperty(onStopProperty))) {
+        Runtime.getRuntime().halt(0);
+      }
       stopping.set(true)
       logInfo("Driver commanded a shutdown")
       // Cannot shutdown here because an ack may need to be sent back to the caller. So send

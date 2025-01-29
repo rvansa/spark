@@ -29,7 +29,7 @@ import org.apache.spark.deploy.{ApplicationDescription, ExecutorState}
 import org.apache.spark.deploy.DeployMessages.ExecutorStateChanged
 import org.apache.spark.deploy.StandaloneResourceUtils.prepareResourcesFile
 import org.apache.spark.internal.Logging
-import org.apache.spark.internal.config.SPARK_EXECUTOR_PREFIX
+import org.apache.spark.internal.config.{EXECUTOR_CHECKPOINT_LOCATION, SPARK_EXECUTOR_PREFIX}
 import org.apache.spark.internal.config.UI._
 import org.apache.spark.resource.ResourceInformation
 import org.apache.spark.rpc.RpcEndpointRef
@@ -153,7 +153,19 @@ private[deploy] class ExecutorRunner(
       // Launch the process
       val arguments = appDesc.command.arguments ++ resourceFileOpt.map(f =>
         Seq("--resourcesFile", f.getAbsolutePath)).getOrElse(Seq.empty)
-      val subsOpts = appDesc.command.javaOpts.map {
+      var javaOpts = appDesc.command.javaOpts
+      val checkpointLocation = conf.getOption(EXECUTOR_CHECKPOINT_LOCATION.key)
+      if (checkpointLocation.nonEmpty) {
+        val checkpointDir = new File(checkpointLocation.get)
+        if (checkpointDir.exists() && checkpointDir.isDirectory && checkpointDir.list().nonEmpty) {
+          javaOpts = javaOpts :+ ("-XX:CRaCRestoreFrom=" + checkpointLocation.get)
+        } else {
+          javaOpts = javaOpts :+
+            ("-XX:CRaCCheckpointTo=" + checkpointLocation.get) :+
+            "-Dspark.executor.onStop=checkpoint"
+        }
+      }
+      val subsOpts = javaOpts.map {
         Utils.substituteAppNExecIds(_, appId, execId.toString)
       }
       val subsCommand = appDesc.command.copy(arguments = arguments, javaOpts = subsOpts)

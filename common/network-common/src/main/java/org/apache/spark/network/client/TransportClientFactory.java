@@ -39,6 +39,9 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import org.crac.Core;
+import org.crac.Context;
+import org.crac.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +59,7 @@ import org.apache.spark.network.util.*;
  * TransportClients will be reused whenever possible. Prior to completing the creation of a new
  * TransportClient, all given {@link TransportClientBootstrap}s will be run.
  */
-public class TransportClientFactory implements Closeable {
+public class TransportClientFactory implements Closeable, Resource {
 
   /** A simple data structure to track the pool of clients between two peer nodes. */
   private static class ClientPool {
@@ -90,6 +93,7 @@ public class TransportClientFactory implements Closeable {
   private final PooledByteBufAllocator pooledAllocator;
   private final NettyMemoryMetrics metrics;
   private final int fastFailTimeWindow;
+  private final EventLoopResource eventLoopResource;
 
   public TransportClientFactory(
       TransportContext context,
@@ -117,6 +121,11 @@ public class TransportClientFactory implements Closeable {
     this.metrics = new NettyMemoryMetrics(
       this.pooledAllocator, conf.getModuleName() + "-client", conf);
     fastFailTimeWindow = (int)(conf.ioRetryWaitTimeMs() * 0.95);
+
+    eventLoopResource = new EventLoopResource(workerGroup);
+    Core.getGlobalContext().register(eventLoopResource);
+    // We need to close the clients first and then suspend eventpools
+    Core.getGlobalContext().register(this);
   }
 
   public MetricSet getAllMetrics() {
@@ -319,9 +328,7 @@ public class TransportClientFactory implements Closeable {
     return client;
   }
 
-  /** Close all connections in the connection pool, and shutdown the worker thread pool. */
-  @Override
-  public void close() {
+  private void closeConnectionPool() {
     // Go through all clients and close them if they are active.
     for (ClientPool clientPool : connectionPool.values()) {
       for (int i = 0; i < clientPool.clients.length; i++) {
@@ -333,9 +340,24 @@ public class TransportClientFactory implements Closeable {
       }
     }
     connectionPool.clear();
+  }
+
+  /** Close all connections in the connection pool, and shutdown the worker thread pool. */
+  @Override
+  public void close() {
+    closeConnectionPool();
 
     if (workerGroup != null && !workerGroup.isShuttingDown()) {
       workerGroup.shutdownGracefully();
     }
+  }
+
+  @Override
+  public void beforeCheckpoint(Context<? extends Resource> context) throws Exception {
+    closeConnectionPool();
+  }
+
+  @Override
+  public void afterRestore(Context<? extends Resource> context) throws Exception {
   }
 }

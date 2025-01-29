@@ -18,8 +18,8 @@
 package org.apache.spark.deploy
 
 import java.lang.reflect.Modifier
-
 import org.apache.spark.SparkConf
+import org.crac.Core
 
 /**
  * Entry point for a Spark application. Implementations must provide a no-argument constructor.
@@ -50,6 +50,11 @@ private[deploy] class JavaMainApplication(klass: Class[_]) extends SparkApplicat
     }
 
     mainMethod.invoke(null, args)
+
+    if ("checkpoint".equalsIgnoreCase(System.getProperty("spark.driver.onStop"))) {
+      System.clearProperty("spark.driver.onStop")
+      Core.checkpointRestore()
+    }
   }
 
 }

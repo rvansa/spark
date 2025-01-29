@@ -26,7 +26,7 @@ package org.apache.spark.launcher;
  */
 public class JavaModuleOptions {
     private static final String[] DEFAULT_MODULE_OPTIONS = {
-      "-XX:+IgnoreUnrecognizedVMOptions",
+//      "-XX:+IgnoreUnrecognizedVMOptions",
       "--add-opens=java.base/java.lang=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",

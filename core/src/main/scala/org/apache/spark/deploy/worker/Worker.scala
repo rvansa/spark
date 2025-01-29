@@ -24,6 +24,8 @@ import java.util.concurrent._
 import java.util.concurrent.{Future => JFuture, ScheduledFuture => JScheduledFuture}
 import java.util.function.Supplier
 
+import org.crac.{ Core, Context, Resource }
+
 import scala.collection.mutable.{HashMap, HashSet, LinkedHashMap}
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Random, Success}
@@ -58,7 +60,7 @@ private[deploy] class Worker(
     val securityMgr: SecurityManager,
     resourceFileOpt: Option[String] = None,
     externalShuffleServiceSupplier: Supplier[ExternalShuffleService] = null)
-  extends ThreadSafeRpcEndpoint with Logging {
+  extends ThreadSafeRpcEndpoint with Logging with Resource {
 
   private val host = rpcEnv.address.host
   private val port = rpcEnv.address.port
@@ -141,6 +143,7 @@ private[deploy] class Worker(
   private var registered = false
   private var connected = false
   private var decommissioned = false
+  @volatile private var paused = false
   // expose for test
   private[spark] val workerId = generateWorkerId()
   private val sparkHome =
@@ -724,9 +727,13 @@ private[deploy] class Worker(
   }
 
   private def masterDisconnected(): Unit = {
-    logError("Connection to master failed! Waiting for master to reconnect...")
     connected = false
-    registerWithMaster()
+    if (!paused) {
+      logError("Connection to master failed! Waiting for master to reconnect...")
+      registerWithMaster()
+    } else {
+      logInfo("Paused, not reconnecting to master...")
+    }
   }
 
   private def maybeCleanupApplication(id: String): Unit = {
@@ -915,6 +922,20 @@ private[deploy] class Worker(
             exitStatus.map(" exitStatus " + _).getOrElse(""))
       }
       maybeCleanupApplication(appId)
+    }
+  }
+
+  Core.getGlobalContext.register(this)
+
+  override def beforeCheckpoint(context: Context[_ <: Resource]): Unit = {
+    logInfo("Pausing worker " + this)
+    paused = true;
+  }
+
+  override def afterRestore(context: Context[_ <: Resource]): Unit = {
+    paused = false;
+    if (!connected) {
+      registerWithMaster()
     }
   }
 }

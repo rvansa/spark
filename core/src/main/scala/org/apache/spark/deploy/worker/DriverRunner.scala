@@ -32,7 +32,7 @@ import org.apache.spark.deploy.StandaloneResourceUtils.prepareResourcesFile
 import org.apache.spark.deploy.master.DriverState
 import org.apache.spark.deploy.master.DriverState.DriverState
 import org.apache.spark.internal.Logging
-import org.apache.spark.internal.config.{DRIVER_RESOURCES_FILE, SPARK_DRIVER_PREFIX}
+import org.apache.spark.internal.config.{DRIVER_CHECKPOINT_LOCATION, DRIVER_RESOURCES_FILE, SPARK_DRIVER_PREFIX}
 import org.apache.spark.internal.config.UI.UI_REVERSE_PROXY
 import org.apache.spark.internal.config.Worker.WORKER_DRIVER_TERMINATE_TIMEOUT
 import org.apache.spark.resource.ResourceInformation
@@ -186,8 +186,18 @@ private[deploy] class DriverRunner(
     }
 
     // config resource file for driver, which would be used to load resources when driver starts up
-    val javaOpts = driverDesc.command.javaOpts ++ resourceFileOpt.map(f =>
+    var javaOpts = driverDesc.command.javaOpts ++ resourceFileOpt.map(f =>
       Seq(s"-D${DRIVER_RESOURCES_FILE.key}=${f.getAbsolutePath}")).getOrElse(Seq.empty)
+    val checkpointLocation = conf.getOption(DRIVER_CHECKPOINT_LOCATION.key)
+    if (checkpointLocation.nonEmpty) {
+      val checkpointDir = new File(checkpointLocation.get)
+      if (checkpointDir.exists() && checkpointDir.isDirectory && checkpointDir.list().nonEmpty) {
+        javaOpts = javaOpts :+ ("-XX:CRaCRestoreFrom=" + checkpointLocation.get)
+      } else {
+        javaOpts = javaOpts :+ ("-XX:CRaCCheckpointTo=" + checkpointLocation.get) :+
+          "-Dspark.driver.onStop=checkpoint"
+      }
+    }
     // TODO: If we add ability to submit multiple jars they should also be added here
     val builder = CommandUtils.buildProcessBuilder(driverDesc.command.copy(javaOpts = javaOpts),
       securityManager, driverDesc.mem, sparkHome.getAbsolutePath, substituteVariables)
@@ -242,6 +252,12 @@ private[deploy] class DriverRunner(
 
       val processStart = clock.getTimeMillis()
       exitCode = process.get.waitFor()
+
+      if (exitCode == 137 && command.command.exists(
+        opt => opt.contains("spark.driver.onStop=checkpoint"))) {
+        // exitCode 137 (killed by signal 9 = SIGKILL) is expected on checkpoint
+        exitCode = 0;
+      }
 
       // check if attempting another run
       keepTrying = supervise && exitCode != 0 && !killed

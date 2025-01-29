@@ -24,6 +24,8 @@ import java.util.concurrent.{ScheduledFuture, TimeUnit}
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.util.Random
 
+import org.crac.{CheckpointException, Context, Core, Resource}
+
 import org.apache.spark.{SecurityManager, SparkConf, SparkException}
 import org.apache.spark.deploy.{ApplicationDescription, DriverDescription, ExecutorState}
 import org.apache.spark.deploy.DeployMessages._
@@ -48,7 +50,7 @@ private[deploy] class Master(
     webUiPort: Int,
     val securityMgr: SecurityManager,
     val conf: SparkConf)
-  extends ThreadSafeRpcEndpoint with Logging with LeaderElectable {
+  extends ThreadSafeRpcEndpoint with Logging with LeaderElectable with Resource {
 
   private val forwardMessageThread =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("master-forward-message-thread")
@@ -1142,7 +1144,9 @@ private[deploy] class Master(
    */
   private def killExecutor(exec: ExecutorDesc): Unit = {
     exec.worker.removeExecutor(exec)
-    exec.worker.endpoint.send(KillExecutor(masterUrl, exec.application.id, exec.id))
+    if (conf.getOption(EXECUTOR_CHECKPOINT_LOCATION.key).isEmpty) {
+      exec.worker.endpoint.send(KillExecutor(masterUrl, exec.application.id, exec.id))
+    }
     exec.state = ExecutorState.KILLED
   }
 
@@ -1213,6 +1217,20 @@ private[deploy] class Master(
       case None =>
         logWarning(s"Asked to remove unknown driver: $driverId")
     }
+  }
+
+  Core.getGlobalContext.register(this)
+
+  override def beforeCheckpoint(context: Context[_ <: Resource]): Unit = {
+    if (idToWorker.nonEmpty) {
+      // We would need to extract TransportClient from WorkerInfo.workerRef and close it;
+      // the interfaces are not well suited for that
+      throw new CheckpointException("This Master node has workers registered; " +
+        "please stop all workers before starting the checkpoint.");
+    }
+  }
+
+  override def afterRestore(context: Context[_ <: Resource]): Unit = {
   }
 }
 

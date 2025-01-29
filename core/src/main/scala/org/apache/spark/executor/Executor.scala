@@ -406,39 +406,43 @@ private[spark] class Executor(
       killTask(t, interruptThread = interruptThread, reason = reason))
   }
 
+  def stopComponents(): Unit = {
+    ShutdownHookManager.removeShutdownHook(stopHookReference)
+    env.metricsSystem.report()
+    try {
+      if (metricsPoller != null) {
+        metricsPoller.stop()
+      }
+    } catch {
+      case NonFatal(e) =>
+        logWarning("Unable to stop executor metrics poller", e)
+    }
+    try {
+      if (heartbeater != null) {
+        heartbeater.stop()
+      }
+    } catch {
+      case NonFatal(e) =>
+        logWarning("Unable to stop heartbeater", e)
+    }
+    ShuffleBlockPusher.stop()
+    if (threadPool != null) {
+      threadPool.shutdown()
+    }
+    if (killMarkCleanupService != null) {
+      killMarkCleanupService.shutdown()
+    }
+    if (defaultSessionState != null && plugins != null) {
+      // Notify plugins that executor is shutting down so they can terminate cleanly
+      Utils.withContextClassLoader(defaultSessionState.replClassLoader) {
+        plugins.foreach(_.shutdown())
+      }
+    }
+  }
+
   def stop(): Unit = {
     if (!executorShutdown.getAndSet(true)) {
-      ShutdownHookManager.removeShutdownHook(stopHookReference)
-      env.metricsSystem.report()
-      try {
-        if (metricsPoller != null) {
-          metricsPoller.stop()
-        }
-      } catch {
-        case NonFatal(e) =>
-          logWarning("Unable to stop executor metrics poller", e)
-      }
-      try {
-        if (heartbeater != null) {
-          heartbeater.stop()
-        }
-      } catch {
-        case NonFatal(e) =>
-          logWarning("Unable to stop heartbeater", e)
-      }
-      ShuffleBlockPusher.stop()
-      if (threadPool != null) {
-        threadPool.shutdown()
-      }
-      if (killMarkCleanupService != null) {
-        killMarkCleanupService.shutdown()
-      }
-      if (defaultSessionState != null && plugins != null) {
-        // Notify plugins that executor is shutting down so they can terminate cleanly
-        Utils.withContextClassLoader(defaultSessionState.replClassLoader) {
-          plugins.foreach(_.shutdown())
-        }
-      }
+      stopComponents()
       if (!isLocal) {
         env.stop()
       }
